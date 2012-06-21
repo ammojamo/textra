@@ -165,8 +165,8 @@
         }
 
         function processNode(node) {
-            nodes.forEach(function(i, n) {
-                if(n.id >= node.id) if(node.process) node.process.cancel();
+            nodes.forEach(function(n, i) {
+                if(n.id >= node.id) if(n.process) n.process.cancel();
             });
 
             function onProgress(a, b) {
