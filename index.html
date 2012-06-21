@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <script type="text/javascript" data-main="scripts/modules" src="scripts/thirdparty/require.js"></script>
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+    <script type="text/javascript" src="scripts/thirdparty/underscore-min.js"></script>
+    <script type="text/javascript" src="scripts/thirdparty/backbone-min.js"></script>
+    <script type="text/javascript" src="scripts/thirdparty/quicksilver.js"></script>
+    <script type="text/javascript" src="scripts/thirdparty/jquery.livesearch.js"></script>
+    <link rel="stylesheet" href="css/bootstrap.min.css" type="text/css" media="screen" />
+    <script type="text/javascript">
+        var nodes = [];
+        var counter = 0;
+        var w = 270;
+        var h = 270;
+
+        function onModulesLoaded() {
+            var mlist = $("#module-list");
+            $(modules).each(function(i) {
+                mlist.append('<li data-index="' + i + '">' + modules[i].name + '</li>');
+            });
+
+            mlist.click(function(evt) {
+                var i = evt.target.getAttribute('data-index');
+                addNode(modules[i]);
+            });
+
+            $('#module-q').liveUpdate('#module-list').focus();
+        };
+
+        function getParametersHtml(module, id) {
+            var
+                html = '',
+                parameters = module.parameters || [],
+                i, p;
+
+            html = '<form class="form-horizontal"><fieldset>';
+            for(i = 0; i < parameters.length; i++) {
+                p = parameters[i];
+                input_id = 'node-' + id + '-' + p.id;
+                html += '<div class="control-group"><label class="control-label" for="' + input_id + '">' + p.name + '</label>';
+                html += '<div class="controls">';
+                switch(p.type) {
+                    case 'range':
+                        html += '<input type="range" min="' + p.min + '" max="' + p.max + '" value="' + p.value + '" id="' + input_id + '" data-param="' + p.id + '">';
+                        break;
+                    case 'text':
+                        html += '<input type="text" class="input-medium" value="' + p.value + '" id="' + input_id + '" data-param="' + p.id + '">';
+                        break;
+                    case 'image':
+                        html += '<div class="input-image" id="' + input_id + '" data-param="' + p.id + '"></div>';
+                        break;
+                }
+                html += '</div></div>';
+            }
+            html += '</fieldset></form>';
+
+            return html;
+        }
+
+        function dupCanvas(source, w, h) {
+            var canvas = document.createElement('canvas'),
+                ctx;
+
+            w = w || source.width;
+            h = h || source.height;
+
+            canvas.width = w;
+            canvas.height = h;
+            ctx = canvas.getContext('2d');
+            ctx.scale(w / source.width, h / source.height);
+            ctx.drawImage(source, 0, 0);
+
+            return canvas;
+        }
+
+        function setupImageInput(el, node) {
+            var canvas,
+                param = el.getAttribute('data-param'),
+                thumb_w = 50, thumb_h = 50, i,
+                n;
+
+            for(i = 0; i < nodes.length; i++) {
+                n = nodes[i];
+                if(n.id >= node.id) break;
+                canvas = dupCanvas(n.canvas, thumb_w, thumb_h);
+                canvas.setAttribute('data-node-id', n.id);
+                if(node.params[param] == n.canvas) $(canvas).addClass('selected');
+
+                el.appendChild(canvas);
+            }
+
+            $(el).on('click', function(evt) {
+                var n = getNode(evt.target.getAttribute('data-node-id'));
+                if(n === undefined) return;
+                $(el).toggleClass('expanded').find('canvas').removeClass('selected');
+                $(evt.target).addClass('selected');
+
+                node.params[param] = n.canvas;
+                processNode(node);
+            });
+        }
+
+        function getNode(id) {
+            var i;
+            for(i = 0; i < nodes.length; i++) if(nodes[i].id == id) return nodes[i];
+        }
+
+        function addNode(module) {
+            var html, el, node, id = counter++;
+
+            html =
+                '<div class="row node">' +
+                    '<div class="span3"><h4>' + module.name + '</h4></div>' +
+                    '<div class="span6">' +
+                        getParametersHtml(module, id) +
+                    '</div>' +
+                    '<div class="span3 output">' +
+                        '<canvas width="' + w + 'px" height="' + h + 'px"></canvas>' +
+                        '<div class="progress"><div class="bar" style="width: 0%;"></div></div>' +
+                    '</div>' +
+                '</div>';
+
+            el = $(html).hide().appendTo('#nodes').fadeIn('slow');
+
+            node = {
+                module: module,
+                canvas: el.find('canvas')[0],
+                progress: el.find('div.progress'),
+                bar: el.find('div.bar'),
+                params: initParams(module, nodes[nodes.length-1]),
+                id: id
+            };
+
+            el.find('input').change(function(evt) {
+                node.params[evt.target.getAttribute('data-param')] = evt.target.value;
+                processNode(node);
+            });
+
+            el.find('.input-image').each(function(i, el) {
+                setupImageInput(el, node)
+            });
+
+            nodes.push(node);
+            processNode(node);
+        }
+
+        function initParams(module, precedingNode) {
+            var params = {};
+
+            module.parameters.forEach(function(p) {
+                if(p.type == 'image') {
+                    params[p.id] = precedingNode.canvas;
+                } else {
+                    params[p.id] = p.value;
+                }
+            });
+
+            return params;
+        }
+
+        function clamp(x, min, max) {
+            return Math.min(Math.max(x, min), max);
+        }
+
+        function processNode(node) {
+            nodes.forEach(function(i, n) {
+                if(n.id >= node.id) if(node.process) node.process.cancel();
+            });
+
+            function onProgress(a, b) {
+                var percentage = Math.floor(clamp(100 * a / Math.abs(b + 0.0000001), 0, 100));
+                node.bar.css('-webkit-transition', '').css('width', percentage + '%');
+            }
+            function onComplete(data) {
+                var i, p = 0, context = node.canvas.getContext('2d');
+
+                node.progress.css('opacity', 0);
+                if(data === true) {
+                    // node has written directly to canvas - nothing to do here
+                } else if(data instanceof Uint8Array) {
+                    imageData = context.getImageData(0, 0, w, h);
+                    for(i = 0; i < data.length; i++) {
+                        imageData.data[p++] = data[i];
+                        imageData.data[p++] = data[i];
+                        imageData.data[p++] = data[i];
+                        imageData.data[p++] = 255;
+                    }
+                    context.putImageData(imageData, 0, 0);
+                } else if(data instanceof ImageData) {
+                    context.putImageData(data, 0, 0);
+                } else {
+                    console.log('Unrecognized onComplete argument: ' + data);
+                }
+
+                // process next node
+                i = nodes.indexOf(node);
+                if(nodes[i+1]) processNode(nodes[i+1]);
+            }
+
+            node.bar.css('-webkit-transition', 'none').css('width', 0);
+            node.progress.css('opacity', 1);
+
+            node.process = node.module.process(node.canvas, node.params, onProgress, onComplete);
+        }
+
+        if(window.modules) window.onModulesLoaded();
+    </script>
+    <style>
+        #module-list li {
+            padding: 0.5em;
+            border-bottom: 1px solid #ccc;
+            cursor: pointer;
+        }
+        #module-list li:hover {
+            background: #eee;
+        }
+        .node .output canvas {
+            background: #eee;
+            width: 100%;
+        }
+        .node .progress {
+            -webkit-transition: opacity linear 0.7s;
+        }
+        .node .progress .bar {
+            -webkit-transition: width linear 0.0s;
+        }
+        .no-transitions {
+            -webkit-transition: none;
+        }
+
+        .input-image canvas {
+            display: none;
+        }
+        .input-image.expanded canvas, .input-image canvas.selected {
+            display: inline-block;
+        }
+
+        .input-image.expanded canvas.selected {
+            border: 1px solid rgba(82, 168, 236, .8);
+            -webkit-box-shadow: inset 0 1px 3px rgba(0,0,0,.1), 0 0 8px rgba(82,168,236,.6);
+            -moz-box-shadow: inset 0 1px 3px rgba(0,0,0,.1), 0 0 8px rgba(82,168,236,.6);
+            box-shadow: inset 0 1px 3px rgba(0,0,0,.1), 0 0 8px rgba(82,168,236,.6);
+            outline: 0;
+        }
+        .input-image canvas {
+            border: 1px solid rgba(0, 0, 0, 0);
+            margin-right: 15px;
+            margin-bottom: 15px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Textra</h1>
+            <p class="lead">Procedural texture generator</p>
+        </div>
+        <div class="row">
+            <div class="span12" id="nodes">
+
+            </div>
+        </div>
+        <div class="row">
+            <div class="span3">
+                <h3>Module selector</h3>
+                <p>Choose a module to start generating textures</p>
+            </div>
+            <div class="span9">
+                <form class="form-search">
+                    <input type="text" class="input-medium search-query" id="module-q">
+                </form>
+                <ul class="unstyled" id="module-list">
+                </ul>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
