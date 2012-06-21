@@ -1,6 +1,7 @@
 require(
     [
         'modules/gen/noise',
+        'modules/gen/dla',
         'modules/filter/blur',
         'modules/filter/compose',
         'modules/filter/threshold',
